@@ -1,6 +1,5 @@
 # AutoStream AI Agent - Social-to-Lead System
 
-
 A production-ready conversational AI agent that converts social media conversations into qualified business leads through natural dialogue. Built with LangGraph and Google Gemini.
 
 Check out [Video Demo](https://drive.google.com/file/d/1ZQp6848MR-yDpBNOyjY2BKHuVRr6Ut1r/view?usp=sharing)
@@ -119,7 +118,7 @@ Agent: I've collected the following information:
 You: yes
 
 ==================================================
-🎯 Lead Captured Successfully!
+Lead Captured Successfully!
 ==================================================
 Name:     YOUR-NAME
 Email:    your@example.com
@@ -131,7 +130,7 @@ Agent: Excellent! I've registered your interest in AutoStream.
        help you get started. Thank you for choosing AutoStream!
 ```
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 autostream-agent/
@@ -147,31 +146,124 @@ autostream-agent/
 
 ## Architecture
 
-### Core Components
-
-1. **Intent Classifier**: LLM-based intent detection
-2. **RAG System**: FAISS vector store + HuggingFace embeddings
-3. **State Machine**: LangGraph workflow with 8 nodes
-4. **Lead Capture**: Progressive information collection
-5. **Validation**: User confirmation loop
-
-### Conversation Flow
+### LangGraph Workflow
 
 ```
-User Input → Intent Classification
-                ↓
-    ┌───────────┴───────────┐
-    │                       │
-Greeting/Inquiry      High Intent
-    │                       │
-RAG Response        Lead Capture Flow
-    │                       │
-Continue              Name → Email → Platform
-                            ↓
-                      Confirmation
-                            ↓
-                      Tool Execution
+                    START
+                      │
+                      ▼
+            ┌──────────────────┐
+            │ Classify Intent  │
+            └────────┬─────────┘
+                     │
+                     ▼
+            ┌──────────────────┐
+            │Generate Response │
+            └────────┬─────────┘
+                     │
+         ┌───────────┴──────────┐
+         │                      │
+    [greeting/inquiry]    [high_intent]
+         │                      │
+         ▼                      ▼
+        END              ┌──────────────┐
+                         │  Ask Field   │
+                         └──────┬───────┘
+                                │
+                      ┌─────────┴─────────┐
+                      │                   │
+                [need field]        [all collected]
+                      │                   │
+                      ▼                   ▼
+              ┌──────────────┐    ┌──────────────┐
+              │Collect Field │    │Confirm Data  │
+              └──────┬───────┘    └──────┬───────┘
+                     │                   │
+                     └─────────┬─────────┘
+                               │
+                     ┌─────────┴─────────┐
+                     │                   │
+                 [confirmed]          [denied]
+                     │                   │
+                     ▼                   ▼
+              ┌──────────────┐    ┌──────────────┐
+              │Execute Tool  │    │Identify Wrong│
+              └──────┬───────┘    │    Field     │
+                     │            └──────┬───────┘
+                     │                   │
+                     ▼                   │
+                    END   ←──────────────┘
 ```
+
+
+#### 8 Core Nodes
+
+1. **classify_intent**: Detects user intent (greeting/inquiry/high_intent)
+2. **generate_response**: Routes to appropriate handler
+3. **ask_field**: Asks for next required field
+4. **collect_field**: Stores user's answer
+5. **confirm_data**: Shows collected data for confirmation
+6. **handle_confirmation**: Processes confirmation response
+7. **identify_wrong_field**: Determines which field to recollect
+8. **execute_tool**: Calls mock_lead_capture and completes flow
+
+### Validation Loop
+
+```
+All 3 fields collected
+        ↓
+Show data to user
+        ↓
+"Is this correct?"
+        ↓
+    ┌───┴───┐
+    │       │
+   YES     NO
+    │       │
+    │       └─→ "Which field is wrong?"
+    │               ↓
+    │          Delete field
+    │               ↓
+    │          Ask for field again
+    │               ↓
+    └───────────────┘
+    (repeat until YES)
+        ↓
+Execute tool
+```
+## Design Decisions
+
+### Why LangGraph?
+
+| Feature | LangGraph | Traditional Approach |
+|---------|-----------|---------------------|
+| **State Management** | Built-in, immutable | Manual tracking |
+| **Flow Control** | Graph-based, visual | Nested if-else |
+| **Debugging** | Clear node execution | Complex stack traces |
+| **Scalability** | Easy to add nodes | Refactor entire code |
+| **Production Ready** | Enterprise-grade | Custom implementation |
+
+### Why Progressive Collection?
+
+**Alternatives Considered:**
+
+1. **All at once**: "Give me name, email, and platform"
+   - ❌ Overwhelming for users
+   - ❌ Less natural
+   - ❌ Higher drop-off rate
+
+2. **Form-based**: Display HTML form
+   - ❌ Not conversational
+   - ❌ Breaks chat experience
+   - ❌ Requires UI change
+
+3. **Progressive (chosen)**: One field at a time
+   - ✅ Natural conversation
+   - ✅ Higher completion rate
+   - ✅ Better user experience
+   - ✅ Easy error correction
+
+---
 
 ## Configuration
 
@@ -203,7 +295,7 @@ embeddings = HuggingFaceEmbeddings(
 )
 ```
 
-## 🧪 Testing
+## Testing
 
 ### Test Scenarios
 
@@ -225,27 +317,66 @@ embeddings = HuggingFaceEmbeddings(
    - Provide corrected information
    - Confirm again
 
-## Development
+## Future Development
 
-### Adding New Intents
+#### 1. API Wrapper
 
-1. Update intent classification prompt in `classify_intent()`
-2. Add new handler function (e.g., `handle_new_intent()`)
-3. Update `generate_response()` routing
-4. Add appropriate edges in `create_agent()`
+```python
+from fastapi import FastAPI
 
-### Adding New Fields
+app = FastAPI()
 
-1. Update `ask_next_field()` with new field question
-2. Add field to sequence in `collect_field_info()`
-3. Update `confirm_data_with_user()` display
-4. Update `mock_lead_capture` tool signature
+@app.post("/chat")
+async def chat(user_id: str, message: str):
+    # Load state from Redis
+    state = load_state(user_id)
+    
+    # Add message
+    state["messages"].append(HumanMessage(content=message))
+    
+    # Run agent
+    result = agent.invoke(state)
+    
+    # Save state
+    save_state(user_id, result)
+    
+    # Return response
+    return {"response": result["messages"][-1].content}
+```
 
-### Extending RAG
 
-1. Add new data to `knowledge_base.json`
-2. Update document processing in `rag()` if needed
-3. Adjust retrieval parameters (`k` value) for more/fewer results
+### 2. WhatsApp Integration
+
+```python
+from flask import Flask, request
+import requests
+
+app = Flask(__name__)
+
+@app.route("/webhook", methods=["POST"])
+def whatsapp_webhook():
+    data = request.json
+    
+    user_phone = data['from']
+    message = data['message']['text']
+    
+    # Load state
+    state = redis.get(f"user:{user_phone}")
+    
+    # Process message
+    state["messages"].append(HumanMessage(content=message))
+    result = agent.invoke(state)
+    
+    # Save state
+    redis.setex(f"user:{user_phone}", 3600, result)
+    
+    # Send response via WhatsApp Business API
+    response_text = result["messages"][-1].content
+    send_whatsapp_message(user_phone, response_text)
+    
+    return {"status": "ok"}
+```
+---
 
 ## Technical Stack
 
@@ -282,7 +413,7 @@ embeddings = HuggingFaceEmbeddings(
 
 This project is created as an assignment for educational purposes.
 
-## 📧 Contact
+## Contact
 
 For questions about this implementation, please refer to the documentation or create an issue in the repository.
 
